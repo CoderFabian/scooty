@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scooter Hacker NFC</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+        h1 { margin-bottom: 10px; color: #00ff88; }
+        p { color: #aaaaaa; margin-bottom: 20px; }
+        button {
+            background-color: #00ff88;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 255, 136, 0.3);
+        }
+        button:active { transform: scale(0.95); }
+        #status { margin-top: 20px; font-size: 14px; min-height: 20px; }
+        .error { color: #ff4444; }
+        .success { color: #00ff88; }
+    </style>
+</head>
+<body>
+
+
+    <h1>🛴 Scooter Unlocker</h1>
+    <p>Houd je telefoon tegen het NFC-punt van de scooter.</p>
+    
+    <button id="startBtn">Start Scanner</button>
+    <div id="status">Klaar om te scannen...</div>
+
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+
+
+        // Controleer of Web NFC ondersteund wordt
+        if (!('NDEFReader' in window)) {
+            statusDiv.textContent = "Web NFC wordt niet ondersteund op deze browser. Gebruik Safari.";
+            statusDiv.className = "error";
+            startBtn.disabled = true;
+        } else {
+            startBtn.addEventListener('click', startNFC);
+        }
+
+
+        async function startNFC() {
+            const ndef = new NDEFReader();
+            statusDiv.textContent = "Scannen...";
+
+
+            await ndef.scan()
+                .then(() => {
+                    statusDiv.textContent = "Zoeken naar tag...";
+                    
+                    // Luister naar tags
+                    ndef.onreading = event => {
+                        const decoder = new TextDecoder();
+                        const message = decoder.decode(event.message.records[0].data);
+                        
+                        statusDiv.textContent = `Tag Gevonden: ${message}`;
+                        statusDiv.className = "success";
+                        
+                        // Hier kun je logica toevoegen om de tag te "spoofen"
+                        // Bijvoorbeeld: Als je een specifieke hex-code hebt gevonden voor een scooter,
+                        // kun je hier de tag herschrijven.
+                        
+                        // Voorbeeld: Schrijf een dummy unlock commando naar de tag
+                        // writeUnlockTag();
+                    };
+
+
+                    ndef.onreadingerror = () => {
+                        statusDiv.textContent = "Tag kon niet gelezen worden.";
+                        statusDiv.className = "error";
+                    };
+                })
+                .catch(error => {
+                    statusDiv.textContent = "Fout: " + error;
+                    statusDiv.className = "error";
+                });
+        }
+
+
+        // Functie om een tag te schrijven (optioneel)
+        async function writeUnlockTag() {
+            const ndef = new NDEFReader();
+            try {
+                await ndef.write("UNLOCK_SCOOTER");
+                statusDiv.textContent = "Tag geschreven: UNLOCK_SCOOTER";
+            } catch (error) {
+                statusDiv.textContent = "Kon tag niet schrijven: " + error;
+            }
+        }
+    </script>
+</body>
+</html>
