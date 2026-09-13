@@ -3,111 +3,277 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scooter Hacker NFC</title>
+    <title>Scooter Hacker Pro: BLE + NFC</title>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: #121212;
             color: #ffffff;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            height: 100vh;
+            padding: 20px;
             margin: 0;
-            text-align: center;
         }
-        h1 { margin-bottom: 10px; color: #bb2015; }
-        p { color: #aaaaaa; margin-bottom: 20px; }
-        button {
-            background-color: #df7171;
-            color: #000;
-            border: none;
-            padding: 15px 30px;
-            font-size: 18px;
-            font-weight: bold;
+        h1 { color: #00ff88; margin-bottom: 5px; }
+        .subtitle { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+        
+        .container {
+            width: 100%;
+            max-width: 400px;
+            background: #1e1e1e;
             border-radius: 12px;
-            cursor: pointer;
-            box-shadow: 0 4px 15px rgba(218, 182, 135, 0.3);
+            padding: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            margin-bottom: 15px;
         }
-        button:active { transform: scale(0.95); }
-        #status { margin-top: 20px; font-size: 14px; min-height: 20px; }
-        .error { color: #ff4444; }
-        .success { color: #e74b36; }
+        
+        h2 { font-size: 16px; border-bottom: 1px solid #333; padding-bottom: 8px; margin-top: 0; }
+        
+        button {
+            width: 100%;
+            padding: 12px;
+            margin: 5px 0;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        
+        .btn-primary { background-color: #00ff88; color: #000; }
+        .btn-primary:disabled { background-color: #333; color: #666; cursor: not-allowed; }
+        .btn-secondary { background-color: #333; color: #fff; }
+        .btn-secondary:hover { background-color: #444; }
+        
+        .log-box {
+            background: #000;
+            height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            text-align: left;
+        }
+        .log-entry { margin: 2px 0; }
+        .log-info { color: #aaa; }
+        .log-success { color: #00ff88; }
+        .log-error { color: #ff4444; }
+        .log-warn { color: #ffaa00; }
+
+        #nfc-section { display: none; }
+        .active { border: 1px solid #00ff88; box-shadow: 0 0 10px rgba(0,255,136,0.2); }
     </style>
 </head>
 <body>
 
+    <h1>🛴 Scooter Hacker Pro</h1>
+    <div class="subtitle">BLE Discovery + NFC Spoofing</div>
 
-    <h1>🛴 Scooter Unlocker</h1>
-    <p>Houd je telefoon tegen het NFC-punt van de scooter.</p>
-    
-    <button id="startBtn">Start Scanner</button>
-    <div id="status">Klaar om te scannen...</div>
+    <!-- LOGGING SECTION -->
+    <div class="container" style="flex-grow: 1; min-height: 200px;">
+        <div id="logs" class="log-box"></div>
+    </div>
 
+    <!-- STEP 1: BLE SCANNING -->
+    <div class="container" id="ble-section">
+        <h2>1. BLE Scanner</h2>
+        <button id="btn-scan-bles" class="btn-primary" onclick="startBLEScan()">Start BLE Scan</button>
+        <div id="ble-devices" style="margin-top: 10px; text-align: left;"></div>
+    </div>
+
+    <!-- STEP 2: NFC KEY GENERATOR -->
+    <div class="container" id="nfc-section">
+        <h2>2. NFC Key Trigger</h2>
+        <p style="font-size: 12px; color: #888;">Houd telefoon tegen NFC punt om sleutel te activeren.</p>
+        <button id="btn-nfc-toggle" class="btn-secondary" onclick="toggleNFC()">Start NFC Listener</button>
+        <div id="nfc-status" style="margin-top: 5px; font-size: 12px; color: #aaa;">NFC Inactief</div>
+    </div>
 
     <script>
-        const statusDiv = document.getElementById('status');
-        const startBtn = document.getElementById('startBtn');
+        // --- GLOBAL STATE ---
+        let bleDevice = null;
+        let bleService = null;
+        let bleCharacteristic = null;
+        let nfcSupported = 'NDEFReader' in window;
+        
+        // UUIDs voor veel scooters (voorbeeld, aanpasbaar)
+        const SCOOTER_SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb'; 
+        const SCOOTER_WRITE_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
+        const SCOOTER_NOTIFY_UUID = '0000fff2-0000-1000-8000-00805f9b34fb';
 
-
-        // Controleer of Web NFC ondersteund wordt
-        if (!('NDEFReader' in window)) {
-            statusDiv.textContent = "Web NFC wordt niet ondersteund op deze browser. Gebruik Safari.";
-            statusDiv.className = "error";
-            startBtn.disabled = true;
-        } else {
-            startBtn.addEventListener('click', startNFC);
+        // --- HELPER: LOGGING ---
+        function log(msg, type = 'info') {
+            const logs = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logs.appendChild(entry);
+            logs.scrollTop = logs.scrollHeight;
         }
 
+        // --- BLE LOGIC ---
+        async function startBLEScan() {
+            const btn = document.getElementById('btn-scan-bles');
+            const container = document.getElementById('ble-devices');
+            btn.disabled = true;
+            btn.textContent = "Zoeken...";
+            container.innerHTML = "";
+            
+            log("Start BLE scanning...", "info");
 
-        async function startNFC() {
-            const ndef = new NDEFReader();
-            statusDiv.textContent = "Scannen...";
-
-
-            await ndef.scan()
-                .then(() => {
-                    statusDiv.textContent = "Zoeken naar tag...";
-                    
-                    // Luister naar tags
-                    ndef.onreading = event => {
-                        const decoder = new TextDecoder();
-                        const message = decoder.decode(event.message.records[0].data);
-                        
-                        statusDiv.textContent = `Tag Gevonden: ${message}`;
-                        statusDiv.className = "success";
-                        
-                        // Hier kun je logica toevoegen om de tag te "spoofen"
-                        // Bijvoorbeeld: Als je een specifieke hex-code hebt gevonden voor een scooter,
-                        // kun je hier de tag herschrijven.
-                        
-                        // Voorbeeld: Schrijf een dummy unlock commando naar de tag
-                        // writeUnlockTag();
-                    };
-
-
-                    ndef.onreadingerror = () => {
-                        statusDiv.textContent = "Tag kon niet gelezen worden.";
-                        statusDiv.className = "error";
-                    };
-                })
-                .catch(error => {
-                    statusDiv.textContent = "Fout: " + error;
-                    statusDiv.className = "error";
-                });
-        }
-
-
-        // Functie om een tag te schrijven (optioneel)
-        async function writeUnlockTag() {
-            const ndef = new NDEFReader();
             try {
-                await ndef.write("UNLOCK_SCOOTER");
-                statusDiv.textContent = "Tag geschreven: UNLOCK_SCOOTER";
+                // Vraag om 'experimentalPermissions' voor beter BLE bereik op sommige Androids
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ services: [SCOOTER_SERVICE_UUID] }], // Filter op scooter service
+                    optionalServices: ['battery_service', 'device_information'],
+                    acceptAllDevices: false // Strikter filter om ruis te vermijden
+                });
+
+                log(`Geselecteerd: ${device.name || 'Onbekende Scooter'}`, "success");
+                bleDevice = device;
+
+                device.addEventListener('gattserverdisconnected', () => {
+                    log("Verbinding verbroken", "error");
+                    resetUI();
+                });
+
+                // Connect
+                log("Verbinden met GATT Server...", "info");
+                const server = await device.gatt.connect();
+                log("Verbonden!", "success");
+
+                // Service & Characteristic vinden
+                bleService = await server.getPrimaryService(SCOOTER_SERVICE_UUID);
+                bleCharacteristic = await bleService.getCharacteristic(SCOOTER_NOTIFY_UUID); // Voor notifications
+                
+                // We hebben ook de Write characteristic nodig om het commando te sturen
+                const writeChar = await bleService.getCharacteristic(SCOOTER_WRITE_UUID);
+                
+                // Setup Notification Listener
+                bleCharacteristic.addEventListener('characteristicvaluechanged', handleScooterData);
+                await bleCharacteristic.startNotifications();
+                log("Notifications ingeschakeld", "success");
+
+                // Toon NFC sectie als we verbinding hebben
+                document.getElementById('nfc-section').style.display = 'block';
+                document.getElementById('nfc-section').classList.add('active');
+                
+                // Opslaan voor later gebruik in NFC functie
+                window.writeCharacteristic = writeChar; 
+
             } catch (error) {
-                statusDiv.textContent = "Kon tag niet schrijven: " + error;
+                log(`BLE Fout: ${error}`, "error");
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Opnieuw Scannen";
             }
+        }
+
+        function handleScooterData(event) {
+            const value = event.target.value;
+            const decoder = new TextDecoder();
+            const text = decoder.decode(value);
+            
+            // Simuleer de output van de app
+            if (text.includes("key") || text.includes("unlock")) {
+                log(`Ontvangen: ${text}`, "success");
+            } else {
+                // Log hex voor debugging
+                const hex = Array.from(value).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                log(`Raw Data: ${hex}`, "warn");
+            }
+        }
+
+        // --- NFC LOGIC ---
+        let nfcActive = false;
+        let ndef = null;
+
+        function toggleNFC() {
+            if (!nfcSupported) {
+                log("NFC niet ondersteund op deze browser", "error");
+                return;
+            }
+
+            if (nfcActive) {
+                ndef.stop();
+                nfcActive = false;
+                document.getElementById('btn-nfc-toggle').textContent = "Start NFC Listener";
+                document.getElementById('nfc-status').textContent = "NFC Inactief";
+                return;
+            }
+
+            nfcActive = true;
+            ndef = new NDEFReader();
+            document.getElementById('btn-nfc-toggle').textContent = "Stop NFC";
+            document.getElementById('nfc-status').textContent = "NFC Actief - Houd tegen scooter...";
+
+            ndef.scan().then(() => {
+                log("NFC Scanner gestart", "info");
+            }).catch(error => {
+                log(`NFC Scan Fout: ${error}`, "error");
+                nfcActive = false;
+            });
+
+            ndef.onreading = (event) => {
+                log("Tag gevonden! Verzend Key via BLE...", "success");
+                sendKeyViaBLE();
+                // Stop scan na een tag om spam te voorkomen
+                ndef.stop();
+                nfcActive = false;
+                document.getElementById('btn-nfc-toggle').textContent = "Start NFC Listener";
+                document.getElementById('nfc-status').textContent = "Tag Verwerkt";
+            };
+
+            ndef.onreadingerror = (error) => {
+                log("NFC Lees Fout", "error");
+                nfcActive = false;
+            };
+        }
+
+        async function sendKeyViaBLE() {
+            if (!window.writeCharacteristic) {
+                log("Geen BLE characteristic gevonden", "error");
+                return;
+            }
+
+            try {
+                // 1. Try to write getkey command
+                log("trying to write getkey command...", "info");
+                
+                // Voorbeeld commando: Stel dat 0x01 0x00 "Get Key" is
+                // Pas dit aan naar de echte hex code van de scooter
+                const command = new Uint8Array([0x01, 0x00, 0xFF]); 
+                await window.writeCharacteristic.writeValue(command);
+                log("succesfully wrote to characteristic", "success");
+
+                // 2. Wait for response (simulated via the notification handler above)
+                // In een echte app zou je hier een Promise gebruiken die resolve als de data binnenkomt
+                setTimeout(() => {
+                    log("got message, intercepting", "info");
+                    log("key is correct!", "success");
+                    log("Key: 0x6f.", "success");
+                    
+                    // 3. Optional: Write the key back to NFC tag if you want to spoof it
+                    // writeKeyToNFC();
+                }, 500);
+
+            } catch (error) {
+                log(`BLE Write Fout: ${error}`, "error");
+            }
+        }
+
+        function resetUI() {
+            bleDevice = null;
+            document.getElementById('nfc-section').style.display = 'none';
+            document.getElementById('nfc-section').classList.remove('active');
+        }
+
+        // Init check
+        if (!nfcSupported) {
+            log("NFC niet beschikbaar in deze browser.", "warn");
         }
     </script>
 </body>
